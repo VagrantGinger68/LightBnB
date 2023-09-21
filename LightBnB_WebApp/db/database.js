@@ -1,3 +1,4 @@
+const { query } = require("express");
 const properties = require("./json/properties.json");
 const users = require("./json/users.json");
 const { Pool } = require('pg');
@@ -98,11 +99,57 @@ const getAllReservations = function (guest_id, limit = 10) {
 
 const getAllProperties = (options, limit = 10) => {
 
-  const queryString = `
-    SELECT * FROM properties LIMIT $1
+  const values = [];
+  // 2
+  let queryString = `
+  SELECT properties.*, avg(property_reviews.rating) as average_rating
+  FROM properties
+  JOIN property_reviews ON properties.id = property_id
   `;
-  const values = [limit];
 
+  if (options.city) {
+    values.push(`%${options.city}%`);
+    queryString += `WHERE city LIKE $${values.length} `;
+  }
+
+  if (options.owner_id) {
+    values.push(options.owner_id);
+    if (options.city) {
+      queryString += ` AND owner_id = $${values.length}`;
+    } else {
+      queryString += ` WHERE owner_id = $${values.length}`;
+    }
+  }
+
+  if (options.minimum_price_per_night && options.maximum_price_per_night) {
+    const minPriceDollars = options.minimum_price_per_night * 100;
+    const maxPriceDollars = options.maximum_price_per_night * 100;
+
+    values.push(`${minPriceDollars}`);
+    values.push(`${maxPriceDollars}`);
+
+    if (options.city || options. owner_id) {
+      queryString += ` AND (properties.cost_per_night > $${values.length - 1} AND properties.cost_per_night < $${values.length})`;
+    } else {
+      queryString += ` WHERE (properties.cost_per_night > $${values.length - 1} AND properties.cost_per_night < $${values.length})`;
+    }
+  }
+
+  queryString += `GROUP BY properties.id`;
+
+  if (options.minimum_rating) {
+    values.push(options.minimum_rating);
+    queryString += ` HAVING AVG(property_reviews.rating) >= $${values.length}`;
+  }
+
+  values.push(limit);
+  queryString += `
+  ORDER BY cost_per_night
+  LIMIT $${values.length};
+  `;
+
+  console.log(queryString, values);
+ 
   return pool
     .query(queryString, values)
     .then((result) => {
